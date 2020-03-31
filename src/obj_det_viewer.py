@@ -60,15 +60,6 @@ void get_layer_01(struct layer_struct *data, const float** data_params);
 ''')
 
 
-# use_webcam = False
-# if use_webcam:
-#     vc = cv.VideoCapture(0)
-# else:
-#     #image_name = os.path.dirname(os.path.dirname(script_path)) + "/input_test.png"
-#     image_name ="D:/Projects/yellow_jacket/data/capture_s4/Capture00050913.png"
-
-# print("image path: " + str(image_name))
-
 # modify these to point to the right locations
 if platform.system() == "Windows":
     libname = "obj_det_lib.dll"
