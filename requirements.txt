@@ -1,7 +1,10 @@
+setuptools
 cffi
 numpy>=1.17.1
 bokeh
+pandas
 opencv-python
+PyQt5
 
 # anaconda3 
 # conda install -c conda-forge bokeh
