@@ -47,7 +47,13 @@ struct detection_struct{
     unsigned int h;
     char label[256];
 };
-    
+
+struct detection_center{
+    unsigned int x;
+    unsigned int y;
+    char name[256];
+};
+
 struct window_struct{
     unsigned int w;
     unsigned int h;
@@ -55,7 +61,9 @@ struct window_struct{
 };
 
 void init_net(const char *net_name, unsigned int *num_classes, struct window_struct** det_win, unsigned int *num_win);
-void run_net(unsigned char* image, unsigned int nr, unsigned int nc, unsigned char** tiled_img, unsigned int *t_nr, unsigned int *t_nc, unsigned char** det_img, unsigned int *num_dets, struct detection_struct** dets);
+void get_pyramid_tiled_input(unsigned char* input_img, unsigned int nr, unsigned int nc, unsigned char** tiled_img, unsigned int* t_nr, unsigned int* t_nc);
+void run_net(unsigned char* image, unsigned int nr, unsigned int nc, unsigned char** det_img, unsigned int *num_dets, struct detection_struct** dets);
+void get_detections(unsigned char* input_img, unsigned int nr, unsigned int nc, unsigned int* num_dets, struct detection_center** dets);
 void get_layer_01(struct layer_struct *data, const float** data_params);
 ''')
 
@@ -136,7 +144,7 @@ def build_layer_image(ls, ld, cell_dim, padding, map_length):
 
 def init_lib():
     global obj_det_lib, ls_01, ld_01, num_classes, detection_windows, \
-        t_nr, t_nc, tiled_img, det_img, num_dets, dets
+        t_nr, t_nc, tiled_img, det_img, num_dets, dets, dc
 
     obj_det_lib = ffi.dlopen(lib_location)
 
@@ -159,6 +167,7 @@ def init_lib():
     det_img = ffi.new('unsigned char**')
     num_dets = ffi.new('unsigned int *')
     dets = ffi.new('struct detection_struct**')
+    dc = ffi.new('struct detection_center**')
 
     # instantiate the get_layer_01 function
     # void get_layer_01(struct layer_struct *data, const float** data_params);
@@ -169,7 +178,7 @@ def init_lib():
 
 def get_input():
     global obj_det_lib, ls_01, ld_01, detection_windows, t_nr, t_nc, tiled_img, det_img, num_dets, dets, tmp_list, fs, \
-        results_div, filename_div, image_path, rgba_img, img_nr, img_nc, p1
+        results_div, filename_div, image_path, rgba_img, img_nr, img_nc, p1, dc
 
     image_name = QFileDialog.getOpenFileName(None, "Select a file",  image_path, "Image files (*.png *.jpg *.gif);;All files (*.*)")
     filename_div.text = "File name: " + image_name[0]
@@ -180,6 +189,7 @@ def get_input():
     # load in an image
     image_path = os.path.dirname(image_name[0])
     color_img = cv.imread(image_name[0])
+    gray_img = cv.cvtColor(color_img, cv.COLOR_BGR2GRAY)
     color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
     img_nr = color_img.shape[0]
     img_nc = color_img.shape[1]
@@ -189,7 +199,9 @@ def get_input():
     p1.image_rgba(image=[np.flipud(rgba_img)], x=0, y=0, dw=400, dh=400)
 
     # run the image on network and get the results
-    obj_det_lib.run_net(color_img.tobytes(), img_nr, img_nc, tiled_img, t_nr, t_nc, det_img, num_dets, dets)
+    obj_det_lib.run_net(gray_img.tobytes(), img_nr, img_nc, det_img, num_dets, dets)
+    obj_det_lib.get_pyramid_tiled_input(gray_img.tobytes(), img_nr, img_nc, tiled_img, t_nr, t_nc)
+    obj_det_lib.get_detections(gray_img.tobytes(), img_nr, img_nc, num_dets, dc)
 
     update_plots()
 
@@ -197,7 +209,7 @@ def get_input():
 
 def update_plots():
     global ls_01, ld_01, detection_windows, t_nr, t_nc, tiled_img, det_img, num_dets, dets, \
-        results_div, rgba_img, img_nr, img_nc, p1, p2, ti, fs
+        results_div, rgba_img, img_nr, img_nc, p1, p2, ti, fs, dc
 
     detections = pd.DataFrame(columns=["x", "y", "h", "w", "label"])
     det_results = "<font size='3'>"
@@ -213,7 +225,11 @@ def update_plots():
     print(dets_text[0:-1])
 
     det_img_alpha = np.full((img_nr, img_nc), 255, dtype=np.uint8)
-    det_img_view = np.dstack([np.reshape(np.frombuffer(ffi.buffer(det_img[0], img_nr * img_nc * 3), dtype=np.uint8), [img_nr, img_nc, 3]), det_img_alpha])
+    det_img_view = np.reshape(np.frombuffer(ffi.buffer(det_img[0], img_nr * img_nc * 3), dtype=np.uint8), [img_nr, img_nc, 3])
+    for idx in range(num_dets[0]):
+        cv.circle(det_img_view, (dc[0][idx].x, dc[0][idx].y), 2, (255, 0, 0), -1)
+
+    det_img_view = np.dstack([det_img_view, det_img_alpha])
 
     tiled_img_alpha = np.full((t_nr[0], t_nc[0]), 255, dtype=np.uint8)
     tiled_img_view = np.dstack([np.reshape(np.frombuffer(ffi.buffer(tiled_img[0], t_nr[0] * t_nc[0] * 3), dtype=np.uint8), [t_nr[0], t_nc[0], 3]),
@@ -287,7 +303,7 @@ for idx in range(num_det_wins):
     sd_key = "l01_img_" + "{:04d}".format(idx)
     fl_data = "@l01_imgf_" + "{:04d}".format(idx)
     fs_title = detection_windows["label"][idx] + " (" + str(detection_windows["h"][idx]) + "x" + str(detection_windows["w"][idx]) + ")"
-    fs_tmp = figure(plot_height=600, plot_width=300, title=fs_title, tools=['wheel_zoom', 'reset', 'save', 'pan'])
+    fs_tmp = figure(plot_height=600, plot_width=300, title=fs_title, tools=['wheel_zoom', 'box_zoom', 'reset', 'save', 'pan'])
     # fs_tmp.image_rgba(image=sd_key, x=0, y=0, dw=400, dh=400, source=source)
     fs_tmp.image_rgba(image=[], x=0, y=0, dw=400, dh=400)
     fs_tmp.axis.visible = False
